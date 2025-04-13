@@ -182,12 +182,14 @@ class SudokuCSP:
         if not unassigned:
             return None
         if heuristic == 'mrv':
-            return min(unassigned, key=lambda var: len(domains[var]))
+            return min(unassigned, key=lambda var: len(domains[var]) if domains[var] else float('inf'))
         elif heuristic == 'degree':
             return max(unassigned, key=lambda var: sum(1 for n in self.neighbors[var] if self.board[n[0]][n[1]] == 0))
         elif heuristic == 'mrv+degree':
-            min_mrv = min(len(domains[var]) for var in unassigned)
-            candidates = [var for var in unassigned if len(domains[var]) == min_mrv]
+            # MRV: Select variables with fewest remaining values
+            min_domain_size = min(len(domains[var]) for var in unassigned if domains[var])
+            candidates = [var for var in unassigned if len(domains[var]) == min_domain_size]
+            # Degree: Break ties by most constraints
             return max(candidates, key=lambda var: sum(1 for n in self.neighbors[var] if self.board[n[0]][n[1]] == 0))
         return unassigned[0]
 
@@ -196,7 +198,7 @@ class SudokuCSP:
             def count_conflicts(value):
                 count = 0
                 for ni, nj in self.neighbors[var]:
-                    if (ni, nj) in domains and value in domains[(ni, nj)]:
+                    if (ni, nj) in domains and self.board[ni][nj] == 0 and value in domains[(ni, nj)]:
                         count += 1
                 return count
             return sorted(domains[var], key=count_conflicts)
@@ -227,37 +229,38 @@ def display_grid(board, title, container=None):
     try:
         # Use container if provided, else use st directly
         target = container if container is not None else st
-        with target.container():
-            st.subheader(title)
-            board_np = np.array(board, dtype=str)
-            board_np[board_np == '0'] = ''
-            df = pd.DataFrame(board_np)
-            styled_df = df.style.set_properties(**{
-                'text-align': 'center',
-                'font-size': '20px',
-                'border': '1px solid black',
-                'width': '50px',
-                'height': '50px'
-            })
-            for i in range(9):
-                for j in range(9):
-                    borders = {}
-                    if i % 3 == 0 and i > 0:
-                        borders['border-top'] = '3px solid black'
-                    if j % 3 == 0 and j > 0:
-                        borders['border-left'] = '3px solid black'
-                    if borders:
-                        styled_df = styled_df.set_properties(**borders, subset=pd.IndexSlice[i, j])
-            st.dataframe(styled_df, use_container_width=False)
-            # Fallback: Display raw board as text
-            st.text("Raw board content:")
-            for row in board:
-                st.text(str(row))
-    except Exception as e:
-        st.error(f"Error displaying grid: {str(e)}")
-        st.text("Raw board content (fallback):")
+        target.subheader(title)
+        board_np = np.array(board, dtype=str)
+        board_np[board_np == '0'] = ''
+        df = pd.DataFrame(board_np)
+        styled_df = df.style.set_properties(**{
+            'text-align': 'center',
+            'font-size': '20px',
+            'border': '1px solid black',
+            'width': '50px',
+            'height': '50px'
+        })
+        for i in range(9):
+            for j in range(9):
+                borders = {}
+                if i % 3 == 0 and i > 0:
+                    borders['border-top'] = '3px solid black'
+                if j % 3 == 0 and j > 0:
+                    borders['border-left'] = '3px solid black'
+                if borders:
+                    styled_df = styled_df.set_properties(**borders, subset=pd.IndexSlice[i, j])
+        # Use unique key to force render
+        target.dataframe(styled_df, use_container_width=False, key=f"{title}_{random.randint(1, 10000)}")
+        # Fallback: Markdown table
+        markdown = f"**{title} (Raw)**:\n\n"
+        markdown += "|   |   |   |   |   |   |   |   |   |\n"
+        markdown += "|---|---|---|---|---|---|---|---|---|\n"
         for row in board:
-            st.text(str(row))
+            markdown += "|" + "|".join(str(x) if x != 0 else " " for x in row) + "|\n"
+        target.markdown(markdown)
+    except Exception as e:
+        target.error(f"Error displaying grid: {str(e)}")
+        target.markdown(f"**{title} (Fallback)**:\n\n" + "\n".join(str(row) for row in board))
 
 def compute_metrics(board):
     methods = {
@@ -270,7 +273,7 @@ def compute_metrics(board):
     for method_name, solver in methods.items():
         times = []
         iterations = 0
-        for _ in range(5):  # Reduced runs to lower resource usage
+        for _ in range(5):
             sudoku = SudokuCSP(copy.deepcopy(board))
             start_time = time.time()
             if not solver(sudoku):
@@ -362,7 +365,7 @@ def main():
                 else:
                     solver = lambda: sudoku.backtracking_with_heuristics("mrv+degree", "lcv")
 
-                for _ in range(5):  # Reduced runs to lower resource usage
+                for _ in range(5):
                     temp_sudoku = SudokuCSP(copy.deepcopy(st.session_state.board))
                     start_time = time.time()
                     if not solver():
@@ -379,6 +382,8 @@ def main():
                 st.session_state.performance = f"Selected Method Performance ({method}): {avg_time:.4f} seconds (avg over 5 runs)"
                 st.write("Debug: Solver completed. Solved board set.")
                 if st.session_state.solved_board is not None:
+                    st.write("Debug: Solved board content preview:")
+                    st.text(str(st.session_state.solved_board[:2]))  # Show first two rows
                     st.write("Debug: Displaying solved board...")
                     display_grid(st.session_state.solved_board, "Solved Puzzle", solved_container)
                     st.write(st.session_state.performance)
