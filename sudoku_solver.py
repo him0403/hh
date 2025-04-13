@@ -2,20 +2,21 @@ import streamlit as st
 import time
 import copy
 import random
+import pandas as pd
 
-# -------------------------------
-# Standalone helper: Check validity for a given board cell.
-# -------------------------------
+# ----------------------------------------------------
+# Utility function: Check if placing 'num' is valid.
+# ----------------------------------------------------
 def is_valid(board, row, col, num):
-    # Row check
+    # Check the row
     for c in range(9):
         if board[row][c] == num:
             return False
-    # Column check
+    # Check the column
     for r in range(9):
         if board[r][col] == num:
             return False
-    # 3x3 Box check
+    # Check the 3x3 sub-grid
     start_row, start_col = 3 * (row // 3), 3 * (col // 3)
     for r in range(start_row, start_row + 3):
         for c in range(start_col, start_col + 3):
@@ -23,13 +24,13 @@ def is_valid(board, row, col, num):
                 return False
     return True
 
-# -------------------------------
-# SudokuSolver Class
-# -------------------------------
+# ----------------------------------------------------
+# SudokuSolver class with different solving methods.
+# ----------------------------------------------------
 class SudokuSolver:
     def __init__(self, board):
         self.board = board
-        self.iterations = 0  # Counter for recursive calls
+        self.iterations = 0  # Counts recursive calls
 
     def find_empty(self, board):
         for r in range(9):
@@ -39,27 +40,16 @@ class SudokuSolver:
         return None
 
     def is_valid(self, board, row, col, num):
-        # Row
-        for c in range(9):
-            if board[row][c] == num:
-                return False
-        # Column
-        for r in range(9):
-            if board[r][col] == num:
-                return False
-        # 3x3 Box
-        start_row, start_col = 3 * (row // 3), 3 * (col // 3)
-        for r in range(start_row, start_row + 3):
-            for c in range(start_col, start_col + 3):
-                if board[r][c] == num:
-                    return False
-        return True
+        return is_valid(board, row, col, num)
 
+    # --------------------------
+    # Basic Backtracking Solver
+    # --------------------------
     def solve_backtracking(self, board):
         self.iterations += 1
         empty = self.find_empty(board)
         if not empty:
-            return True  # Solved
+            return True  # Solved!
         row, col = empty
         for num in range(1, 10):
             if self.is_valid(board, row, col, num):
@@ -69,17 +59,18 @@ class SudokuSolver:
                 board[row][col] = 0  # Backtrack
         return False
 
+    # -----------------------------------------------
+    # Randomized Backtracking (for complete board gen.)
+    # -----------------------------------------------
     def solve_backtracking_random(self, board):
-        """Variant of backtracking for generating a complete board.
-        Randomizes the order of numbers to achieve variety."""
         self.iterations += 1
         empty = self.find_empty(board)
         if not empty:
             return True
         row, col = empty
-        numbers = list(range(1, 10))
-        random.shuffle(numbers)
-        for num in numbers:
+        nums = list(range(1, 10))
+        random.shuffle(nums)
+        for num in nums:
             if self.is_valid(board, row, col, num):
                 board[row][col] = num
                 if self.solve_backtracking_random(board):
@@ -87,44 +78,12 @@ class SudokuSolver:
                 board[row][col] = 0
         return False
 
-    def get_neighbors(self, row, col):
-        """Return positions that share a row, column, or 3x3 box with the (row, col) cell."""
-        neighbors = set()
-        for i in range(9):
-            if i != col:
-                neighbors.add((row, i))
-            if i != row:
-                neighbors.add((i, col))
-        start_row, start_col = 3 * (row // 3), 3 * (col // 3)
-        for r in range(start_row, start_row + 3):
-            for c in range(start_col, start_col + 3):
-                if (r, c) != (row, col):
-                    neighbors.add((r, c))
-        return neighbors
-
-    def init_domains(self, board):
-        """Initialize domains for every cell based on the current board."""
-        domains = {}
-        for r in range(9):
-            for c in range(9):
-                if board[r][c] == 0:
-                    domains[(r, c)] = set(range(1, 10))
-                else:
-                    domains[(r, c)] = {board[r][c]}
-        # Prune domains based on pre-assigned values
-        for r in range(9):
-            for c in range(9):
-                if board[r][c] != 0:
-                    num = board[r][c]
-                    for neighbor in self.get_neighbors(r, c):
-                        nr, nc = neighbor
-                        if board[nr][nc] == 0 and num in domains[(nr, nc)]:
-                            domains[(nr, nc)].remove(num)
-        return domains
-
+    # -----------------------------------------
+    # Forward Checking Solver (with MRV heuristic)
+    # -----------------------------------------
     def solve_forward_checking(self, board, domains):
         self.iterations += 1
-        # Find an empty cell; also choose one with Minimum Remaining Values (MRV)
+        # Choose an empty cell using MRV (minimum remaining values)
         empty = None
         for r in range(9):
             for c in range(9):
@@ -134,9 +93,7 @@ class SudokuSolver:
             if empty:
                 break
         if not empty:
-            return True  # Solved
-
-        # Use MRV to select the unassigned cell with the smallest domain.
+            return True
         row, col = empty
         min_size = 10
         for r in range(9):
@@ -145,7 +102,6 @@ class SudokuSolver:
                     min_size = len(domains[(r, c)])
                     row, col = r, c
 
-        # Try all possible numbers from the selected cell’s domain.
         for num in sorted(domains[(row, col)]):
             if self.is_valid(board, row, col, num):
                 board[row][col] = num
@@ -164,15 +120,150 @@ class SudokuSolver:
                     continue
                 if self.solve_forward_checking(board, new_domains):
                     return True
-                board[row][col] = 0  # Backtrack
+                board[row][col] = 0
         return False
 
-# -------------------------------
-# Uniqueness checker: Count number of solutions.
-# -------------------------------
+    # --------------------------
+    # CSP solver: Combines AC3, MRV, Degree Tie-breaker, and LCV ordering
+    # --------------------------
+    def solve_csp(self, board, domains):
+        self.iterations += 1
+        # Enforce arc consistency
+        domains = self.ac3(domains)
+        if domains is False:
+            return False
+        # Check if assignment is complete.
+        complete = True
+        for r in range(9):
+            for c in range(9):
+                if board[r][c] == 0:
+                    complete = False
+                    break
+            if not complete:
+                break
+        if complete:
+            return True
+
+        # Select unassigned variable using MRV with Degree heuristic.
+        var = self.select_unassigned_variable(board, domains)
+        if var is None:
+            return True
+        row, col = var
+        # Order values by Least Constraining Value (LCV)
+        for val in self.order_domain_values(row, col, board, domains):
+            if self.is_valid(board, row, col, val):
+                board[row][col] = val
+                new_domains = copy.deepcopy(domains)
+                new_domains[(row, col)] = {val}
+                if self.solve_csp(board, new_domains):
+                    return True
+                board[row][col] = 0
+        return False
+
+    # --------------------------------------------------
+    # Helper: Get neighbors (same row, column, and box)
+    # --------------------------------------------------
+    def get_neighbors(self, row, col):
+        neighbors = set()
+        for i in range(9):
+            if i != col:
+                neighbors.add((row, i))
+            if i != row:
+                neighbors.add((i, col))
+        start_row, start_col = 3 * (row // 3), 3 * (col // 3)
+        for r in range(start_row, start_row + 3):
+            for c in range(start_col, start_col + 3):
+                if (r, c) != (row, col):
+                    neighbors.add((r, c))
+        return neighbors
+
+    # ---------------------------
+    # Initialize domains for each cell.
+    # ---------------------------
+    def init_domains(self, board):
+        domains = {}
+        for r in range(9):
+            for c in range(9):
+                if board[r][c] == 0:
+                    domains[(r, c)] = set(range(1, 10))
+                else:
+                    domains[(r, c)] = {board[r][c]}
+        # Prune domains based on assigned cells.
+        for r in range(9):
+            for c in range(9):
+                if board[r][c] != 0:
+                    num = board[r][c]
+                    for neighbor in self.get_neighbors(r, c):
+                        nr, nc = neighbor
+                        if board[nr][nc] == 0 and num in domains[(nr, nc)]:
+                            domains[(nr, nc)].remove(num)
+        return domains
+
+    # -----------------------------------------
+    # AC3: Enforce arc-consistency.
+    # -----------------------------------------
+    def ac3(self, domains):
+        queue = [(xi, xj) for xi in domains for xj in self.get_neighbors(xi[0], xi[1])]
+        while queue:
+            (xi, xj) = queue.pop(0)
+            if self.revise(domains, xi, xj):
+                if len(domains[xi]) == 0:
+                    return False
+                for xk in self.get_neighbors(xi[0], xi[1]):
+                    if xk != xj:
+                        queue.append((xk, xi))
+        return domains
+
+    def revise(self, domains, xi, xj):
+        revised = False
+        for a in set(domains[xi]):
+            # For the constraint "≠", if every value in domain[xj] equals a then a cannot be used.
+            if all(b == a for b in domains[xj]):
+                domains[xi].remove(a)
+                revised = True
+        return revised
+
+    # --------------------------------------------------
+    # MRV with Degree Tie-breaker: Select unassigned variable.
+    # --------------------------------------------------
+    def select_unassigned_variable(self, board, domains):
+        candidate = None
+        min_size = 10
+        max_degree = -1
+        for r in range(9):
+            for c in range(9):
+                if board[r][c] == 0:
+                    size = len(domains[(r, c)])
+                    if size < min_size:
+                        min_size = size
+                        candidate = (r, c)
+                        max_degree = sum(1 for n in self.get_neighbors(r, c) if board[n[0]][n[1]] == 0)
+                    elif size == min_size:
+                        degree = sum(1 for n in self.get_neighbors(r, c) if board[n[0]][n[1]] == 0)
+                        if degree > max_degree:
+                            candidate = (r, c)
+                            max_degree = degree
+        return candidate
+
+    # --------------------------------------------------
+    # LCV: Order domain values by least constraining effect.
+    # --------------------------------------------------
+    def order_domain_values(self, row, col, board, domains):
+        values = list(domains[(row, col)])
+        def count_constraints(val):
+            count = 0
+            for (nr, nc) in self.get_neighbors(row, col):
+                if board[nr][nc] == 0 and val in domains[(nr, nc)]:
+                    count += 1
+            return count
+        values.sort(key=lambda val: count_constraints(val))
+        return values
+
+# ----------------------------------------------------
+# Puzzle Generator Functions
+# ----------------------------------------------------
 def count_solutions(board):
     count = 0
-
     def solve_count(bd):
         nonlocal count
         empty = None
@@ -191,29 +282,22 @@ def count_solutions(board):
             if is_valid(bd, row, col, num):
                 bd[row][col] = num
                 solve_count(bd)
-                if count > 1:  # Early exit if more than one solution is found.
+                if count > 1:
                     return
                 bd[row][col] = 0
-
     board_copy = copy.deepcopy(board)
     solve_count(board_copy)
     return count
 
-# -------------------------------
-# Generate a complete sudoku board
-# -------------------------------
 def generate_complete_board():
     board = [[0 for _ in range(9)] for _ in range(9)]
     solver = SudokuSolver(board)
     solver.solve_backtracking_random(board)
     return board
 
-# -------------------------------
-# Generate a puzzle with unique solution based on difficulty.
-# -------------------------------
 def generate_puzzle(difficulty):
     complete_board = generate_complete_board()
-    # Set the number of clues (filled cells) based on difficulty.
+    # Set clues based on difficulty.
     if difficulty == "Easy":
         clues = 40
     elif difficulty == "Medium":
@@ -221,8 +305,6 @@ def generate_puzzle(difficulty):
     elif difficulty == "Hard":
         clues = 25
     cells_to_remove = 81 - clues
-
-    # Remove cells in a random order, ensuring puzzle uniqueness.
     positions = [(r, c) for r in range(9) for c in range(9)]
     random.shuffle(positions)
     puzzle = copy.deepcopy(complete_board)
@@ -232,39 +314,40 @@ def generate_puzzle(difficulty):
             break
         temp = puzzle[r][c]
         puzzle[r][c] = 0
-        # Check if the puzzle still has a unique solution.
         if count_solutions(puzzle) != 1:
-            puzzle[r][c] = temp  # Revert removal if not unique.
+            puzzle[r][c] = temp
         else:
             removed += 1
     return puzzle
 
-# -------------------------------
-# Helper function: Display sudoku board in Streamlit.
-# -------------------------------
-def display_board(board, header):
+# ----------------------------------------------------
+# Display the board in grid format using a pandas DataFrame.
+# ----------------------------------------------------
+def display_board_grid(board, header):
     st.subheader(header)
-    # Display as rows in a table-like fashion.
-    for row in board:
-        st.write(row)
+    df = pd.DataFrame(board, columns=[str(i + 1) for i in range(9)])
+    st.table(df)
 
-# -------------------------------
+# ----------------------------------------------------
 # Main Streamlit App
-# -------------------------------
-st.title("Sudoku Solver with Random Puzzle Generator")
+# ----------------------------------------------------
+st.title("Advanced Sudoku Solver with Random Puzzle Generator")
 
-# Sidebar: User selections
+# Sidebar Options
 difficulty = st.sidebar.selectbox("Select Puzzle Difficulty", ["Easy", "Medium", "Hard"])
-solver_method = st.sidebar.selectbox("Select Solving Method", ["Backtracking", "Forward Checking"])
-test_runs = st.sidebar.number_input("Number of Test Runs", min_value=1, value=5, step=1)
+algorithm = st.sidebar.selectbox(
+    "Select Solving Method",
+    ["Backtracking", "Forward Checking", "CSP (AC3+MRV+Degree+LCV)"]
+)
+test_runs = st.sidebar.number_input("Number of Test Runs", min_value=1, value=3, step=1)
 
-# Use session_state to hold the puzzle and its solution
+# Session state to hold the puzzle and its solution.
 if "puzzle" not in st.session_state:
     st.session_state["puzzle"] = None
 if "solution" not in st.session_state:
     st.session_state["solution"] = None
 
-# Button to generate a new puzzle
+# Button: Generate a new puzzle.
 if st.sidebar.button("Generate Puzzle"):
     with st.spinner("Generating puzzle..."):
         puzzle = generate_puzzle(difficulty)
@@ -272,11 +355,11 @@ if st.sidebar.button("Generate Puzzle"):
         st.session_state["solution"] = None
     st.success("Puzzle generated!")
 
-# Display the generated puzzle (if any)
+# Display the generated puzzle.
 if st.session_state["puzzle"] is not None:
-    display_board(st.session_state["puzzle"], "Generated Puzzle")
+    display_board_grid(st.session_state["puzzle"], "Generated Puzzle")
 
-# Button to solve the puzzle using the selected method and report performance.
+# Button: Solve Puzzle with the selected method.
 if st.sidebar.button("Solve Puzzle"):
     if st.session_state["puzzle"] is None:
         st.error("Please generate a puzzle first!")
@@ -289,30 +372,33 @@ if st.sidebar.button("Solve Puzzle"):
             board_copy = copy.deepcopy(puzzle)
             solver = SudokuSolver(board_copy)
             start_time = time.time()
-            if solver_method == "Backtracking":
+            if algorithm == "Backtracking":
                 solver.solve_backtracking(board_copy)
-            else:
+            elif algorithm == "Forward Checking":
                 domains = solver.init_domains(board_copy)
                 solver.solve_forward_checking(board_copy, domains)
+            else:  # CSP method with AC3, MRV, Degree, LCV
+                domains = solver.init_domains(board_copy)
+                solver.solve_csp(board_copy, domains)
             elapsed = time.time() - start_time
             total_time += elapsed
             total_iters += solver.iterations
             solved_board = board_copy
         avg_time = total_time / test_runs
         avg_iters = total_iters / test_runs
-        st.write(f"**Solving Method:** {solver_method}")
+        st.write(f"**Solving Method:** {algorithm}")
         st.write(f"**Average Time:** {avg_time:.4f} seconds over {test_runs} runs")
         st.write(f"**Average Iterations:** {avg_iters:.0f}")
         st.session_state["solution"] = solved_board
-        display_board(solved_board, "Solved Puzzle")
+        display_board_grid(solved_board, "Solved Puzzle")
 
-# Button to compare performance of both methods on the same board.
-if st.sidebar.button("Compare Performance (Both Methods)"):
+# Button: Compare performance of all methods on the same puzzle.
+if st.sidebar.button("Compare Performance (All Methods)"):
     if st.session_state["puzzle"] is None:
         st.error("Please generate a puzzle first!")
     else:
         puzzle = copy.deepcopy(st.session_state["puzzle"])
-        methods = ["Backtracking", "Forward Checking"]
+        methods = ["Backtracking", "Forward Checking", "CSP (AC3+MRV+Degree+LCV)"]
         results = []
         for method in methods:
             total_time = 0
@@ -323,9 +409,12 @@ if st.sidebar.button("Compare Performance (Both Methods)"):
                 start_time = time.time()
                 if method == "Backtracking":
                     solver.solve_backtracking(board_copy)
-                else:
+                elif method == "Forward Checking":
                     domains = solver.init_domains(board_copy)
                     solver.solve_forward_checking(board_copy, domains)
+                else:
+                    domains = solver.init_domains(board_copy)
+                    solver.solve_csp(board_copy, domains)
                 elapsed = time.time() - start_time
                 total_time += elapsed
                 total_iters += solver.iterations
