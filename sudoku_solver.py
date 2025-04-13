@@ -223,52 +223,28 @@ class SudokuCSP:
         domains = {v: d.copy() for v, d in self.domains.items()}
         return backtrack(domains)
 
-def display_grid(board, title, placeholder=None):
-    if placeholder:
-        with placeholder.container():
-            st.subheader(title)
-            board_np = np.array(board, dtype=str)
-            board_np[board_np == '0'] = ''
-            df = pd.DataFrame(board_np)
-            styled_df = df.style.set_properties(**{
-                'text-align': 'center',
-                'font-size': '20px',
-                'border': '1px solid black',
-                'width': '50px',
-                'height': '50px'
-            })
-            for i in range(9):
-                for j in range(9):
-                    borders = {}
-                    if i % 3 == 0 and i > 0:
-                        borders['border-top'] = '3px solid black'
-                    if j % 3 == 0 and j > 0:
-                        borders['border-left'] = '3px solid black'
-                    if borders:
-                        styled_df = styled_df.set_properties(**borders, subset=pd.IndexSlice[i, j])
-            st.dataframe(styled_df, use_container_width=False)
-    else:
-        st.subheader(title)
-        board_np = np.array(board, dtype=str)
-        board_np[board_np == '0'] = ''
-        df = pd.DataFrame(board_np)
-        styled_df = df.style.set_properties(**{
-            'text-align': 'center',
-            'font-size': '20px',
-            'border': '1px solid black',
-            'width': '50px',
-            'height': '50px'
-        })
-        for i in range(9):
-            for j in range(9):
-                borders = {}
-                if i % 3 == 0 and i > 0:
-                    borders['border-top'] = '3px solid black'
-                if j % 3 == 0 and j > 0:
-                    borders['border-left'] = '3px solid black'
-                if borders:
-                    styled_df = styled_df.set_properties(**borders, subset=pd.IndexSlice[i, j])
-        st.dataframe(styled_df, use_container_width=False)
+def display_grid(board, title):
+    st.subheader(title)
+    board_np = np.array(board, dtype=str)
+    board_np[board_np == '0'] = ''
+    df = pd.DataFrame(board_np)
+    styled_df = df.style.set_properties(**{
+        'text-align': 'center',
+        'font-size': '20px',
+        'border': '1px solid black',
+        'width': '50px',
+        'height': '50px'
+    })
+    for i in range(9):
+        for j in range(9):
+            borders = {}
+            if i % 3 == 0 and i > 0:
+                borders['border-top'] = '3px solid black'
+            if j % 3 == 0 and j > 0:
+                borders['border-left'] = '3px solid black'
+            if borders:
+                styled_df = styled_df.set_properties(**borders, subset=pd.IndexSlice[i, j])
+    st.dataframe(styled_df, use_container_width=False)
 
 def compute_metrics(board):
     methods = {
@@ -306,13 +282,8 @@ def main():
         st.session_state.metrics = compute_metrics(st.session_state.board)
         st.session_state.difficulty = "Medium"
 
-    # Create placeholders for dynamic content
-    initial_puzzle_placeholder = st.empty()
-    solved_puzzle_placeholder = st.empty()
-    performance_placeholder = st.empty()
-
     # Display initial puzzle
-    display_grid(st.session_state.board, "Initial Puzzle", initial_puzzle_placeholder)
+    display_grid(st.session_state.board, "Initial Puzzle")
 
     # Controls
     st.subheader("Controls")
@@ -360,7 +331,7 @@ def main():
             if not solver():
                 st.error(f"No solution exists for {method}!")
                 st.session_state.solved_board = None
-                performance_placeholder.write("Solve failed.")
+                st.write("Debug: Solve failed.")
                 return
             end_time = time.time()
             times.append(end_time - start_time)
@@ -369,19 +340,21 @@ def main():
 
         avg_time = sum(times) / len(times)
         st.session_state.performance = f"Selected Method Performance ({method}): {avg_time:.4f} seconds (avg over 10 runs)"
-        
-        # Force display of solved puzzle
+        st.write("Debug: Solved board set.")
+        # Immediately display solved puzzle
         if st.session_state.solved_board is not None:
-            display_grid(st.session_state.solved_board, "Solved Puzzle", solved_puzzle_placeholder)
-            performance_placeholder.write(st.session_state.performance)
+            display_grid(st.session_state.solved_board, "Solved Puzzle")
+            st.write(st.session_state.performance)
         else:
-            performance_placeholder.write("Failed to generate solved puzzle.")
+            st.write("Debug: Solved board is None.")
+        st.rerun()  # Force UI refresh
 
-    # Display solved puzzle and performance if already solved
+    # Display solved puzzle if already set
     if st.session_state.solved_board is not None:
-        display_grid(st.session_state.solved_board, "Solved Puzzle", solved_puzzle_placeholder)
+        st.write("Debug: Rendering existing solved board.")
+        display_grid(st.session_state.solved_board, "Solved Puzzle")
         if st.session_state.performance:
-            performance_placeholder.write(st.session_state.performance)
+            st.write(st.session_state.performance)
 
     # New puzzle button
     if st.button("New Puzzle"):
@@ -390,8 +363,6 @@ def main():
         st.session_state.solved_board = None
         st.session_state.performance = None
         st.session_state.metrics = compute_metrics(st.session_state.board)
-        solved_puzzle_placeholder.empty()
-        performance_placeholder.empty()
         st.rerun()
 
     # Comparison table
