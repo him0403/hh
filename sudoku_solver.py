@@ -40,6 +40,9 @@ class SudokuCSP:
                 return False
         return True
 
+    def is_solved(self) -> bool:
+        return all(self.board[i][j] != 0 for i in range(9) for j in range(9))
+
     @staticmethod
     def is_valid(board: List[List[int]], row: int, col: int, num: int) -> bool:
         for x in range(9):
@@ -186,10 +189,8 @@ class SudokuCSP:
         elif heuristic == 'degree':
             return max(unassigned, key=lambda var: sum(1 for n in self.neighbors[var] if self.board[n[0]][n[1]] == 0))
         elif heuristic == 'mrv+degree':
-            # MRV: Select variables with fewest remaining values
             min_domain_size = min(len(domains[var]) for var in unassigned if domains[var])
             candidates = [var for var in unassigned if len(domains[var]) == min_domain_size]
-            # Degree: Break ties by most constraints
             return max(candidates, key=lambda var: sum(1 for n in self.neighbors[var] if self.board[n[0]][n[1]] == 0))
         return unassigned[0]
 
@@ -210,7 +211,7 @@ class SudokuCSP:
             self.iterations += 1
             var = self.select_unassigned_variable(domains, heuristic_var)
             if not var:
-                return True
+                return self.is_solved()
             i, j = var
             for value in self.order_domain_values(var, domains, heuristic_val):
                 if self.is_consistent(var, value):
@@ -227,7 +228,7 @@ class SudokuCSP:
 
 def display_grid(board, title, container=None):
     try:
-        # Use container if provided, else use st directly
+        st.write(f"Debug: Entering display_grid for {title}")
         target = container if container is not None else st
         target.subheader(title)
         board_np = np.array(board, dtype=str)
@@ -249,15 +250,14 @@ def display_grid(board, title, container=None):
                     borders['border-left'] = '3px solid black'
                 if borders:
                     styled_df = styled_df.set_properties(**borders, subset=pd.IndexSlice[i, j])
-        # Use unique key to force render
         target.dataframe(styled_df, use_container_width=False, key=f"{title}_{random.randint(1, 10000)}")
-        # Fallback: Markdown table
-        markdown = f"**{title} (Raw)**:\n\n"
+        markdown = f"**{title} (Markdown)**:\n\n"
         markdown += "|   |   |   |   |   |   |   |   |   |\n"
         markdown += "|---|---|---|---|---|---|---|---|---|\n"
         for row in board:
             markdown += "|" + "|".join(str(x) if x != 0 else " " for x in row) + "|\n"
         target.markdown(markdown)
+        st.write(f"Debug: Completed display_grid for {title}")
     except Exception as e:
         target.error(f"Error displaying grid: {str(e)}")
         target.markdown(f"**{title} (Fallback)**:\n\n" + "\n".join(str(row) for row in board))
@@ -284,6 +284,7 @@ def compute_metrics(board):
                 iterations = sudoku.iterations
         avg_time = sum(times) / len(times)
         metrics[method_name] = {"iterations": iterations, "avg_time": avg_time}
+        st.write(f"Debug: {method_name} iterations: {iterations}")
     return metrics
 
 def main():
@@ -350,6 +351,7 @@ def main():
 
     # Solve button
     if st.button("Solve"):
+        solved_container.empty()  # Clear previous content
         with solved_container:
             st.write("Debug: Starting solve process...")
             try:
@@ -368,9 +370,10 @@ def main():
                 for _ in range(5):
                     temp_sudoku = SudokuCSP(copy.deepcopy(st.session_state.board))
                     start_time = time.time()
-                    if not solver():
+                    solved = solver()
+                    if not solved or not temp_sudoku.is_solved():
                         st.error(f"No solution exists for {method}!")
-                        st.write("Debug: Solver returned False.")
+                        st.write("Debug: Solver returned False or incomplete solution.")
                         st.session_state.solved_board = None
                         return
                     end_time = time.time()
@@ -383,7 +386,7 @@ def main():
                 st.write("Debug: Solver completed. Solved board set.")
                 if st.session_state.solved_board is not None:
                     st.write("Debug: Solved board content preview:")
-                    st.text(str(st.session_state.solved_board[:2]))  # Show first two rows
+                    st.text(str(st.session_state.solved_board))  # Full board
                     st.write("Debug: Displaying solved board...")
                     display_grid(st.session_state.solved_board, "Solved Puzzle", solved_container)
                     st.write(st.session_state.performance)
