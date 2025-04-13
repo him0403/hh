@@ -224,9 +224,9 @@ class SudokuCSP:
         return backtrack(domains)
 
 def display_grid(board, title, container=None):
-    if container is None:
-        container = st
-    with container:
+    # Use container if provided, else use st directly
+    target = container if container is not None else st
+    with target.container():
         st.subheader(title)
         board_np = np.array(board, dtype=str)
         board_np[board_np == '0'] = ''
@@ -355,7 +355,7 @@ def main():
             st.write("Debug: Solver completed. Solved board set.")
             if st.session_state.solved_board is not None:
                 st.write("Debug: Displaying solved board...")
-                display_grid(st.session_state.solved_board, "Solved Puzzle")
+                display_grid(st.session_state.solved_board, "Solved Puzzle", solved_container)
                 st.write(st.session_state.performance)
             else:
                 st.write("Debug: Solved board is None after solving.")
@@ -364,7 +364,7 @@ def main():
     if st.session_state.solved_board is not None:
         with solved_container:
             st.write("Debug: Rendering existing solved board...")
-            display_grid(st.session_state.solved_board, "Solved Puzzle")
+            display_grid(st.session_state.solved_board, "Solved Puzzle", solved_container)
             if st.session_state.performance:
                 st.write(st.session_state.performance)
 
