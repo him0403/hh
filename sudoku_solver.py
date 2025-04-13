@@ -3,6 +3,7 @@ import time
 import random
 import copy
 import numpy as np
+import pandas as pd
 from typing import List, Tuple, Set, Dict
 from collections import deque
 
@@ -215,10 +216,8 @@ class SudokuCSP:
 
 def display_grid(board, title):
     st.subheader(title)
-    # Convert board to numpy array for display
     board_np = np.array(board, dtype=str)
     board_np[board_np == '0'] = ''
-    # Create a styled DataFrame
     df = pd.DataFrame(board_np)
     st.table(df.style.set_properties(**{
         'text-align': 'center',
@@ -294,7 +293,7 @@ def main():
         st.session_state.original_board = copy.deepcopy(st.session_state.board)
         st.session_state.solved_board = None
         st.session_state.performance = None
-        st.experimental_rerun()
+        st.rerun()
 
 if __name__ == "__main__":
     main()
