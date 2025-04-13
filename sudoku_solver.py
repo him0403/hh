@@ -5,18 +5,18 @@ import random
 import pandas as pd
 
 # ----------------------------------------------------
-# Basic Utility Function: Check if a number is valid at (row, col)
+# Utility: Check if placing 'num' at (row, col) is valid.
 # ----------------------------------------------------
 def is_valid(board, row, col, num):
-    # Check row
+    # Row check.
     for c in range(9):
         if board[row][c] == num:
             return False
-    # Check column
+    # Column check.
     for r in range(9):
         if board[r][col] == num:
             return False
-    # Check 3x3 sub-grid
+    # Check 3x3 sub-grid.
     start_row, start_col = 3 * (row // 3), 3 * (col // 3)
     for r in range(start_row, start_row + 3):
         for c in range(start_col, start_col + 3):
@@ -25,7 +25,7 @@ def is_valid(board, row, col, num):
     return True
 
 # ----------------------------------------------------
-# Sudoku Solver Class with Various Backtracking Variants
+# SudokuSolver: Contains various backtracking solver variants.
 # ----------------------------------------------------
 class SudokuSolver:
     def __init__(self, board):
@@ -33,7 +33,6 @@ class SudokuSolver:
         self.iterations = 0  # Count of recursive calls
 
     def find_empty(self, board):
-        # Simple row-major empty cell search.
         for r in range(9):
             for c in range(9):
                 if board[r][c] == 0:
@@ -57,9 +56,55 @@ class SudokuSolver:
                 board[row][col] = 0  # Backtrack
         return False
 
-    # -----------------------------------------------
-    # 2. Backtracking with Arc Consistency (AC3 Filtering)
-    # -----------------------------------------------
+    # ------------------------------------------------
+    # 2. BT with Forward Checking (FC)
+    # ------------------------------------------------
+    def solve_forward_checking(self, board, domains):
+        self.iterations += 1
+        # Find an empty cell—if none, puzzle is solved.
+        empty = None
+        for r in range(9):
+            for c in range(9):
+                if board[r][c] == 0:
+                    empty = (r, c)
+                    break
+            if empty:
+                break
+        if not empty:
+            return True
+        row, col = empty
+        # Use MRV: choose the empty cell with the smallest domain.
+        min_size = 10
+        for r in range(9):
+            for c in range(9):
+                if board[r][c] == 0 and len(domains[(r, c)]) < min_size:
+                    min_size = len(domains[(r, c)])
+                    row, col = r, c
+        # Try each candidate from the cell's domain.
+        for num in sorted(domains[(row, col)]):
+            if is_valid(board, row, col, num):
+                board[row][col] = num
+                new_domains = copy.deepcopy(domains)
+                new_domains[(row, col)] = {num}
+                failed = False
+                for neighbor in self.get_neighbors(row, col):
+                    nr, nc = neighbor
+                    if board[nr][nc] == 0 and num in new_domains[(nr, nc)]:
+                        new_domains[(nr, nc)].remove(num)
+                        if not new_domains[(nr, nc)]:
+                            failed = True
+                            break
+                if failed:
+                    board[row][col] = 0
+                    continue
+                if self.solve_forward_checking(board, new_domains):
+                    return True
+                board[row][col] = 0
+        return False
+
+    # ------------------------------------------------
+    # 3. BT with Arc Consistency (AC3 Filtering)
+    # ------------------------------------------------
     def get_neighbors(self, row, col):
         neighbors = set()
         for i in range(9):
@@ -82,7 +127,6 @@ class SudokuSolver:
                     domains[(r, c)] = set(range(1, 10))
                 else:
                     domains[(r, c)] = {board[r][c]}
-        # Prune domains for assigned cells.
         for r in range(9):
             for c in range(9):
                 if board[r][c] != 0:
@@ -106,7 +150,7 @@ class SudokuSolver:
 
     def revise(self, domains, xi, xj):
         revised = False
-        # The constraint is "≠", so if every value in domain[xj] equals a then remove a.
+        # Under the "≠" constraint, if every value in domain[xj] equals a, then remove a.
         for a in set(domains[xi]):
             if all(b == a for b in domains[xj]):
                 domains[xi].remove(a)
@@ -115,11 +159,9 @@ class SudokuSolver:
 
     def solve_backtracking_ac3(self, board, domains):
         self.iterations += 1
-        # Enforce arc consistency on the domains.
         domains = self.ac3(domains)
         if domains is False:
             return False
-        # Check if complete.
         complete = True
         for r in range(9):
             for c in range(9):
@@ -130,17 +172,15 @@ class SudokuSolver:
                 break
         if complete:
             return True
-        # Choose an unassigned cell (row-major order).
         cell = None
         for r in range(9):
             for c in range(9):
                 if board[r][c] == 0:
                     cell = (r, c)
                     break
-            if cell is not None:
+            if cell:
                 break
         row, col = cell
-        # Try every value in the domain for this cell.
         for num in sorted(domains[(row, col)]):
             if is_valid(board, row, col, num):
                 board[row][col] = num
@@ -152,7 +192,7 @@ class SudokuSolver:
         return False
 
     # --------------------------
-    # 3. Backtracking with MRV (Minimum Remaining Values)
+    # 4. BT with MRV (Minimum Remaining Values)
     # --------------------------
     def find_empty_mrv(self, board):
         best = None
@@ -181,7 +221,7 @@ class SudokuSolver:
         return False
 
     # --------------------------
-    # 4. Backtracking with MRV + Degree Heuristic
+    # 5. BT with MRV + Degree Heuristic
     # --------------------------
     def find_empty_mrv_degree(self, board):
         best = None
@@ -213,12 +253,10 @@ class SudokuSolver:
         return False
 
     # --------------------------
-    # 5. Backtracking with LCV (Least Constraining Value)
+    # 6. BT with LCV (Least Constraining Value)
     # --------------------------
     def order_values_lcv(self, board, row, col):
-        # Gather candidate values that are valid.
         candidates = [num for num in range(1, 10) if is_valid(board, row, col, num)]
-        # Define impact: For each candidate, sum the number of legal moves available for neighbors.
         def impact(num):
             impact_count = 0
             board[row][col] = num
@@ -227,7 +265,6 @@ class SudokuSolver:
                     impact_count += sum(1 for k in range(1, 10) if is_valid(board, nr, nc, k))
             board[row][col] = 0
             return impact_count
-        # A higher impact value means that candidate leaves more options (i.e. it is less constraining).
         candidates.sort(key=impact, reverse=True)
         return candidates
 
@@ -278,13 +315,13 @@ def count_solutions(board):
 def generate_complete_board():
     board = [[0 for _ in range(9)] for _ in range(9)]
     solver = SudokuSolver(board)
-    solver.solve_backtracking_random = solver.solve_backtracking  # reuse basic BT with random order if desired
-    solver.solve_backtracking_random(board)
+    # Use a randomized BT to complete the board.
+    solver.solve_backtracking(board)
     return board
 
 def generate_puzzle(difficulty):
     complete_board = generate_complete_board()
-    # Set clue count based on difficulty.
+    # Define the number of clues based on difficulty.
     if difficulty == "Easy":
         clues = 40
     elif difficulty == "Medium":
@@ -320,13 +357,13 @@ def display_board_grid(board, header):
 # ----------------------------------------------------
 st.title("Sudoku Solver – Backtracking Variants & Performance Analysis")
 
-# Sidebar: Puzzle Difficulty and Method Selection
+# Sidebar: Puzzle Difficulty and Method Selection.
 difficulty = st.sidebar.selectbox("Select Puzzle Difficulty", ["Easy", "Medium", "Hard"])
-
 method_selection = st.sidebar.multiselect(
-    "Select Solving Method(s) (select one or more, or choose 'Compare All')",
+    "Select Solving Method(s) (select one or more)",
     options=[
         "Basic Backtracking",
+        "BT with Forward Checking",
         "BT with Arc Consistency",
         "BT with MRV",
         "BT with MRV + Degree",
@@ -334,7 +371,6 @@ method_selection = st.sidebar.multiselect(
     ],
     default=["Basic Backtracking"]
 )
-
 test_runs = st.sidebar.number_input("Number of Test Runs", min_value=1, value=3, step=1)
 
 # Button to generate a new puzzle.
@@ -345,18 +381,20 @@ if st.sidebar.button("Generate Puzzle"):
         st.session_state["solution"] = None
     st.success("Puzzle generated!")
 
-# Show generated puzzle if exists.
+# Display the generated puzzle.
 if "puzzle" in st.session_state and st.session_state["puzzle"] is not None:
     display_board_grid(st.session_state["puzzle"], "Generated Puzzle")
 
-# Dictionary mapping method names to solver functions.
+# run_solver: Runs the selected method on a copy of the puzzle.
 def run_solver(method, puzzle):
     board_copy = copy.deepcopy(puzzle)
     solver = SudokuSolver(board_copy)
     start_time = time.time()
-    # Run the chosen method.
     if method == "Basic Backtracking":
         solver.solve_backtracking(board_copy)
+    elif method == "BT with Forward Checking":
+        domains = solver.init_domains(board_copy)
+        solver.solve_forward_checking(board_copy, domains)
     elif method == "BT with Arc Consistency":
         domains = solver.init_domains(board_copy)
         solver.solve_backtracking_ac3(board_copy, domains)
@@ -369,14 +407,13 @@ def run_solver(method, puzzle):
     elapsed = time.time() - start_time
     return board_copy, elapsed, solver.iterations
 
-# Button: Solve Puzzle using selected method(s)
+# Button: Solve Puzzle using the selected method(s).
 if st.sidebar.button("Solve Puzzle"):
     if "puzzle" not in st.session_state or st.session_state["puzzle"] is None:
         st.error("Please generate a puzzle first!")
     else:
         puzzle = st.session_state["puzzle"]
         results = []
-        # For each selected method, run test_runs times and average the performance.
         for method in method_selection:
             total_time = 0
             total_iters = 0
@@ -391,20 +428,18 @@ if st.sidebar.button("Solve Puzzle"):
             results.append({"Method": method,
                             "Avg Time (s)": round(avg_time, 4),
                             "Avg Iterations": int(avg_iters)})
-            # Save the last solved board for display if only one method is chosen.
             if len(method_selection) == 1:
                 st.session_state["solution"] = solved_board
 
-        # If one method, show the solved board.
+        # If only one method is selected, display the solved puzzle.
         if len(method_selection) == 1 and st.session_state.get("solution") is not None:
             display_board_grid(st.session_state["solution"], "Solved Puzzle")
         
-        # Show performance metrics as a table.
         st.subheader("Performance Metrics")
         df_results = pd.DataFrame(results)
         st.table(df_results)
 
-# Optional: Button to compare performance of all methods on the same puzzle.
+# Optional: Button to compare performance of all methods.
 if st.sidebar.button("Compare Performance (All Methods)"):
     if "puzzle" not in st.session_state or st.session_state["puzzle"] is None:
         st.error("Please generate a puzzle first!")
@@ -412,6 +447,7 @@ if st.sidebar.button("Compare Performance (All Methods)"):
         puzzle = st.session_state["puzzle"]
         all_methods = [
             "Basic Backtracking",
+            "BT with Forward Checking",
             "BT with Arc Consistency",
             "BT with MRV",
             "BT with MRV + Degree",
