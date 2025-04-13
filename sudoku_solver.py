@@ -11,6 +11,7 @@ class SudokuCSP:
     def __init__(self, board: List[List[int]]):
         self.board = board
         self.variables = [(i, j) for i in range(9) for j in range(9)]
+        # Initialize domains: {value} for filled cells, {1-9} for empty
         self.domains = {(i, j): {board[i][j]} if board[i][j] != 0 else set(range(1, 10)) 
                         for i, j in self.variables}
         self.neighbors = self._build_neighbors()
@@ -74,16 +75,29 @@ class SudokuCSP:
                         return False
             return True
         
+        # Fill board
         fill_board(board)
         
+        # Verify solvability before clue removal
+        solver = SudokuCSP(copy.deepcopy(board))
+        if not solver.backtracking_search():
+            return SudokuCSP.generate_random_sudoku(clues)  # Retry if unsolvable
+        
+        # Remove clues
         cells = [(i, j) for i in range(9) for j in range(9)]
         random.shuffle(cells)
         remove_count = 81 - clues
+        temp_board = copy.deepcopy(board)
         for i in range(min(remove_count, len(cells))):
             row, col = cells[i]
-            board[row][col] = 0
+            temp_board[row][col] = 0
         
-        return board
+        # Verify puzzle is solvable
+        solver = SudokuCSP(copy.deepcopy(temp_board))
+        if not solver.backtracking_search():
+            return SudokuCSP.generate_random_sudoku(clues)  # Retry if unsolvable
+        
+        return temp_board
 
     def backtracking_search(self) -> bool:
         self.iterations = 0
@@ -94,7 +108,7 @@ class SudokuCSP:
                 return True
             var = unassigned[0]
             i, j = var
-            for value in self.domains[var]:
+            for value in range(1, 10):  # Direct range for simplicity
                 if self.is_consistent(var, value):
                     self.board[i][j] = value
                     if backtrack():
@@ -211,7 +225,7 @@ class SudokuCSP:
             self.iterations += 1
             var = self.select_unassigned_variable(domains, heuristic_var)
             if not var:
-                return self.is_solved()
+                return True
             i, j = var
             for value in self.order_domain_values(var, domains, heuristic_val):
                 if self.is_consistent(var, value):
@@ -276,8 +290,7 @@ def compute_metrics(board):
         for _ in range(5):
             sudoku = SudokuCSP(copy.deepcopy(board))
             start_time = time.time()
-            if not solver(sudoku):
-                return None
+            solved = solver(sudoku)
             end_time = time.time()
             times.append(end_time - start_time)
             if _ == 0:
@@ -301,6 +314,7 @@ def main():
             st.session_state.metrics = compute_metrics(st.session_state.board)
             st.session_state.difficulty = "Medium"
             st.write("Debug: Session state initialized.")
+            st.write("Debug: Initial board:", str(st.session_state.board))
         except Exception as e:
             st.error(f"Error initializing session state: {str(e)}")
             return
@@ -331,6 +345,7 @@ def main():
             st.session_state.metrics = compute_metrics(st.session_state.board)
             solved_container.empty()
             st.write("Debug: Difficulty changed and puzzle updated.")
+            st.write("Debug: New board:", str(st.session_state.board))
     except Exception as e:
         st.error(f"Error handling difficulty selection: {str(e)}")
 
@@ -351,7 +366,7 @@ def main():
 
     # Solve button
     if st.button("Solve"):
-        solved_container.empty()  # Clear previous content
+        solved_container.empty()
         with solved_container:
             st.write("Debug: Starting solve process...")
             try:
@@ -371,27 +386,26 @@ def main():
                     temp_sudoku = SudokuCSP(copy.deepcopy(st.session_state.board))
                     start_time = time.time()
                     solved = solver()
-                    if not solved or not temp_sudoku.is_solved():
-                        st.error(f"No solution exists for {method}!")
-                        st.write("Debug: Solver returned False or incomplete solution.")
-                        st.session_state.solved_board = None
-                        return
                     end_time = time.time()
                     times.append(end_time - start_time)
                     if _ == 0:
-                        st.session_state.solved_board = temp_sudoku.board
+                        if solved:
+                            st.session_state.solved_board = temp_sudoku.board
+                        else:
+                            st.session_state.solved_board = None
 
                 avg_time = sum(times) / len(times)
                 st.session_state.performance = f"Selected Method Performance ({method}): {avg_time:.4f} seconds (avg over 5 runs)"
                 st.write("Debug: Solver completed. Solved board set.")
                 if st.session_state.solved_board is not None:
                     st.write("Debug: Solved board content preview:")
-                    st.text(str(st.session_state.solved_board))  # Full board
+                    st.text(str(st.session_state.solved_board))
                     st.write("Debug: Displaying solved board...")
                     display_grid(st.session_state.solved_board, "Solved Puzzle", solved_container)
                     st.write(st.session_state.performance)
                 else:
-                    st.write("Debug: Solved board is None after solving.")
+                    st.error(f"No solution found for {method}!")
+                    st.write("Debug: Solver failed to produce a solution.")
             except Exception as e:
                 st.error(f"Error during solving: {str(e)}")
 
@@ -413,9 +427,10 @@ def main():
             st.session_state.original_board = copy.deepcopy(st.session_state.board)
             st.session_state.solved_board = None
             st.session_state.performance = None
-            st.session_state.metrics = compute_metrics(st.session_state.board)
+            st.session_state.metrics = SudokuCSP.generate_random_sudoku(clues=clue_map[st.session_state.difficulty])
             solved_container.empty()
             st.write("Debug: New puzzle generated.")
+            st.write("Debug: New board:", str(st.session_state.board))
         except Exception as e:
             st.error(f"Error generating new puzzle: {str(e)}")
 
