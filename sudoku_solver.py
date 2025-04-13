@@ -14,6 +14,7 @@ class SudokuCSP:
         self.domains = {(i, j): {board[i][j]} if board[i][j] != 0 else set(range(1, 10)) 
                         for i, j in self.variables}
         self.neighbors = self._build_neighbors()
+        self.iterations = 0  # Track backtracking steps
 
     def _build_neighbors(self) -> Dict[Tuple[int, int], Set[Tuple[int, int]]]:
         neighbors = {(i, j): set() for i, j in self.variables}
@@ -82,7 +83,9 @@ class SudokuCSP:
         return board
 
     def backtracking_search(self) -> bool:
+        self.iterations = 0
         def backtrack():
+            self.iterations += 1
             unassigned = [(i, j) for i, j in self.variables if self.board[i][j] == 0]
             if not unassigned:
                 return True
@@ -128,7 +131,9 @@ class SudokuCSP:
         return True
 
     def backtracking_fc(self) -> bool:
+        self.iterations = 0
         def backtrack(domains):
+            self.iterations += 1
             unassigned = [(i, j) for i, j in self.variables if self.board[i][j] == 0]
             if not unassigned:
                 return True
@@ -148,10 +153,12 @@ class SudokuCSP:
         return backtrack(domains)
 
     def backtracking_ac3(self) -> bool:
+        self.iterations = 0
         domains = {v: d.copy() for v, d in self.domains.items()}
         if not self.ac3(domains):
             return False
         def backtrack(domains):
+            self.iterations += 1
             unassigned = [(i, j) for i, j in self.variables if self.board[i][j] == 0]
             if not unassigned:
                 return True
@@ -196,7 +203,9 @@ class SudokuCSP:
         return list(domains[var])
 
     def backtracking_with_heuristics(self, heuristic_var: str = 'none', heuristic_val: str = 'none') -> bool:
+        self.iterations = 0
         def backtrack(domains):
+            self.iterations += 1
             var = self.select_unassigned_variable(domains, heuristic_var)
             if not var:
                 return True
@@ -219,13 +228,47 @@ def display_grid(board, title):
     board_np = np.array(board, dtype=str)
     board_np[board_np == '0'] = ''
     df = pd.DataFrame(board_np)
-    st.table(df.style.set_properties(**{
+    styled_df = df.style.set_properties(**{
         'text-align': 'center',
         'font-size': '20px',
         'border': '1px solid black',
         'width': '50px',
         'height': '50px'
-    }))
+    })
+    for i in range(9):
+        for j in range(9):
+            borders = {}
+            if i % 3 == 0 and i > 0:
+                borders['border-top'] = '3px solid black'
+            if j % 3 == 0 and j > 0:
+                borders['border-left'] = '3px solid black'
+            if borders:
+                styled_df = styled_df.set_properties(**borders, subset=pd.IndexSlice[i, j])
+    st.dataframe(styled_df, use_container_width=False)
+
+def compute_metrics(board):
+    methods = {
+        "Basic Backtracking": lambda s: s.backtracking_search(),
+        "Forward Checking": lambda s: s.backtracking_fc(),
+        "Arc Consistency": lambda s: s.backtracking_ac3(),
+        "Heuristics (MRV + Degree + LCV)": lambda s: s.backtracking_with_heuristics("mrv+degree", "lcv")
+    }
+    metrics = {}
+    for method_name, solver in methods.items():
+        times = []
+        iterations = 0
+        for _ in range(10):
+            sudoku = SudokuCSP(copy.deepcopy(board))
+            start_time = time.time()
+            if not solver(sudoku):
+                return None  # Unsolvable puzzle
+            end_time = time.time()
+            times.append(end_time - start_time)
+            if _ == 0:
+                iterations = sudoku.iterations
+        avg_time = sum(times) / len(times)
+        metrics[method_name] = {"iterations": iterations, "avg_time": avg_time}
+    return metrics
 
 def main():
     st.title("Sudoku Solver")
@@ -236,64 +279,109 @@ def main():
         st.session_state.original_board = copy.deepcopy(st.session_state.board)
         st.session_state.solved_board = None
         st.session_state.performance = None
+        st.session_state.metrics = compute_metrics(st.session_state.board)
+        st.session_state.difficulty = "Medium"
 
-    # Display initial puzzle
-    display_grid(st.session_state.board, "Initial Puzzle")
+    # Layout with two columns
+    col1, col2 = st.columns([3, 2])
 
-    # Method selection
-    method = st.selectbox("Select Solving Method:", 
-                          ["Basic Backtracking", "Forward Checking", "Arc Consistency", "Heuristics (MRV + Degree + LCV)"])
-    
-    # Map method to internal name
-    method_map = {
-        "Basic Backtracking": "basic",
-        "Forward Checking": "fc",
-        "Arc Consistency": "ac3",
-        "Heuristics (MRV + Degree + LCV)": "heuristics"
-    }
-    selected_method = method_map[method]
+    with col1:
+        # Display initial puzzle
+        display_grid(st.session_state.board, "Initial Puzzle")
 
-    # Solve button
-    if st.button("Solve"):
-        sudoku = SudokuCSP(copy.deepcopy(st.session_state.board))
-        times = []
+        # Display solved puzzle if available
+        if st.session_state.solved_board is not None:
+            display_grid(st.session_state.solved_board, "Solved Puzzle")
+            if st.session_state.performance:
+                st.write(st.session_state.performance)
+
+    with col2:
+        # Difficulty selection
+        difficulty = st.selectbox("Select Difficulty:", ["Easy", "Medium", "Hard"], 
+                                 index=["Easy", "Medium", "Hard"].index(st.session_state.difficulty))
+        clue_map = {"Easy": 40, "Medium": 30, "Hard": 25}
         
-        if selected_method == "basic":
-            solver = sudoku.backtracking_search
-        elif selected_method == "fc":
-            solver = sudoku.backtracking_fc
-        elif selected_method == "ac3":
-            solver = sudoku.backtracking_ac3
-        else:  # heuristics
-            solver = lambda: sudoku.backtracking_with_heuristics("mrv+degree", "lcv")
+        if difficulty != st.session_state.difficulty:
+            st.session_state.difficulty = difficulty
+            st.session_state.board = SudokuCSP.generate_random_sudoku(clues=clue_map[difficulty])
+            st.session_state.original_board = copy.deepcopy(st.session_state.board)
+            st.session_state.solved_board = None
+            st.session_state.performance = None
+            st.session_state.metrics = compute_metrics(st.session_state.board)
+            st.rerun()
 
-        for _ in range(10):
-            temp_sudoku = SudokuCSP(copy.deepcopy(st.session_state.board))
-            start_time = time.time()
-            if not solver():
-                st.error(f"No solution exists for {method}!")
-                return
-            end_time = time.time()
-            times.append(end_time - start_time)
-            if _ == 0:
-                st.session_state.solved_board = temp_sudoku.board
+        # Method selection
+        method = st.selectbox("Select Solving Method:", 
+                             ["Basic Backtracking", "Forward Checking", "Arc Consistency", "Heuristics (MRV + Degree + LCV)"])
+        
+        # Map method to internal name
+        method_map = {
+            "Basic Backtracking": "basic",
+            "Forward Checking": "fc",
+            "Arc Consistency": "ac3",
+            "Heuristics (MRV + Degree + LCV)": "heuristics"
+        }
+        selected_method = method_map[method]
 
-        avg_time = sum(times) / len(times)
-        st.session_state.performance = f"Performance ({method}): {avg_time:.4f} seconds (avg over 10 runs)"
+        # Solve button
+        if st.button("Solve"):
+            sudoku = SudokuCSP(copy.deepcopy(st.session_state.board))
+            times = []
+            
+            if selected_method == "basic":
+                solver = sudoku.backtracking_search
+            elif selected_method == "fc":
+                solver = sudoku.backtracking_fc
+            elif selected_method == "ac3":
+                solver = sudoku.backtracking_ac3
+            else:  # heuristics
+                solver = lambda: sudoku.backtracking_with_heuristics("mrv+degree", "lcv")
 
-    # Display solved puzzle if available
-    if st.session_state.solved_board is not None:
-        display_grid(st.session_state.solved_board, "Solved Puzzle")
-        if st.session_state.performance:
-            st.write(st.session_state.performance)
+            for _ in range(10):
+                temp_sudoku = SudokuCSP(copy.deepcopy(st.session_state.board))
+                start_time = time.time()
+                if not solver():
+                    st.error(f"No solution exists for {method}!")
+                    st.session_state.solved_board = None
+                    return
+                end_time = time.time()
+                times.append(end_time - start_time)
+                if _ == 0:
+                    st.session_state.solved_board = temp_sudoku.board
 
-    # New puzzle button
-    if st.button("New Puzzle"):
-        st.session_state.board = SudokuCSP.generate_random_sudoku(clues=30)
-        st.session_state.original_board = copy.deepcopy(st.session_state.board)
-        st.session_state.solved_board = None
-        st.session_state.performance = None
-        st.rerun()
+            avg_time = sum(times) / len(times)
+            st.session_state.performance = f"Selected Method Performance ({method}): {avg_time:.4f} seconds (avg over 10 runs)"
+
+        # New puzzle button
+        if st.button("New Puzzle"):
+            st.session_state.board = SudokuCSP.generate_random_sudoku(clues=clue_map[st.session_state.difficulty])
+            st.session_state.original_board = copy.deepcopy(st.session_state.board)
+            st.session_state.solved_board = None
+            st.session_state.performance = None
+            st.session_state.metrics = compute_metrics(st.session_state.board)
+            st.rerun()
+
+    # Comparison table for all methods
+    st.subheader("Comparison of Solving Methods")
+    if st.session_state.metrics:
+        metrics_data = []
+        for method_name, data in st.session_state.metrics.items():
+            metrics_data.append({
+                "Method": method_name,
+                "Iterations": data["iterations"],
+                "Avg Time (seconds)": f"{data['avg_time']:.4f}"
+            })
+        df = pd.DataFrame(metrics_data)
+        styled_df = df.style.set_properties(**{
+            'text-align': 'center',
+            'font-size': '14px',
+            'border': '1px solid black'
+        }).set_table_styles([
+            {'selector': 'th', 'props': [('font-weight', 'bold'), ('background-color', '#f0f0f0'), ('border', '1px solid black')]}
+        ])
+        st.dataframe(styled_df, use_container_width=True)
+    else:
+        st.error("Unable to compute metrics for this puzzle.")
 
 if __name__ == "__main__":
     main()
