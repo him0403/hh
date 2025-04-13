@@ -14,7 +14,7 @@ class SudokuCSP:
         self.domains = {(i, j): {board[i][j]} if board[i][j] != 0 else set(range(1, 10)) 
                         for i, j in self.variables}
         self.neighbors = self._build_neighbors()
-        self.iterations = 0  # Track backtracking steps
+        self.iterations = 0
 
     def _build_neighbors(self) -> Dict[Tuple[int, int], Set[Tuple[int, int]]]:
         neighbors = {(i, j): set() for i, j in self.variables}
@@ -223,28 +223,52 @@ class SudokuCSP:
         domains = {v: d.copy() for v, d in self.domains.items()}
         return backtrack(domains)
 
-def display_grid(board, title):
-    st.subheader(title)
-    board_np = np.array(board, dtype=str)
-    board_np[board_np == '0'] = ''
-    df = pd.DataFrame(board_np)
-    styled_df = df.style.set_properties(**{
-        'text-align': 'center',
-        'font-size': '20px',
-        'border': '1px solid black',
-        'width': '50px',
-        'height': '50px'
-    })
-    for i in range(9):
-        for j in range(9):
-            borders = {}
-            if i % 3 == 0 and i > 0:
-                borders['border-top'] = '3px solid black'
-            if j % 3 == 0 and j > 0:
-                borders['border-left'] = '3px solid black'
-            if borders:
-                styled_df = styled_df.set_properties(**borders, subset=pd.IndexSlice[i, j])
-    st.dataframe(styled_df, use_container_width=False)
+def display_grid(board, title, placeholder=None):
+    if placeholder:
+        with placeholder.container():
+            st.subheader(title)
+            board_np = np.array(board, dtype=str)
+            board_np[board_np == '0'] = ''
+            df = pd.DataFrame(board_np)
+            styled_df = df.style.set_properties(**{
+                'text-align': 'center',
+                'font-size': '20px',
+                'border': '1px solid black',
+                'width': '50px',
+                'height': '50px'
+            })
+            for i in range(9):
+                for j in range(9):
+                    borders = {}
+                    if i % 3 == 0 and i > 0:
+                        borders['border-top'] = '3px solid black'
+                    if j % 3 == 0 and j > 0:
+                        borders['border-left'] = '3px solid black'
+                    if borders:
+                        styled_df = styled_df.set_properties(**borders, subset=pd.IndexSlice[i, j])
+            st.dataframe(styled_df, use_container_width=False)
+    else:
+        st.subheader(title)
+        board_np = np.array(board, dtype=str)
+        board_np[board_np == '0'] = ''
+        df = pd.DataFrame(board_np)
+        styled_df = df.style.set_properties(**{
+            'text-align': 'center',
+            'font-size': '20px',
+            'border': '1px solid black',
+            'width': '50px',
+            'height': '50px'
+        })
+        for i in range(9):
+            for j in range(9):
+                borders = {}
+                if i % 3 == 0 and i > 0:
+                    borders['border-top'] = '3px solid black'
+                if j % 3 == 0 and j > 0:
+                    borders['border-left'] = '3px solid black'
+                if borders:
+                    styled_df = styled_df.set_properties(**borders, subset=pd.IndexSlice[i, j])
+        st.dataframe(styled_df, use_container_width=False)
 
 def compute_metrics(board):
     methods = {
@@ -261,7 +285,7 @@ def compute_metrics(board):
             sudoku = SudokuCSP(copy.deepcopy(board))
             start_time = time.time()
             if not solver(sudoku):
-                return None  # Unsolvable puzzle
+                return None
             end_time = time.time()
             times.append(end_time - start_time)
             if _ == 0:
@@ -282,86 +306,95 @@ def main():
         st.session_state.metrics = compute_metrics(st.session_state.board)
         st.session_state.difficulty = "Medium"
 
-    # Layout with two columns
-    col1, col2 = st.columns([3, 2])
+    # Create placeholders for dynamic content
+    initial_puzzle_placeholder = st.empty()
+    solved_puzzle_placeholder = st.empty()
+    performance_placeholder = st.empty()
 
-    with col1:
-        # Display initial puzzle
-        display_grid(st.session_state.board, "Initial Puzzle")
+    # Display initial puzzle
+    display_grid(st.session_state.board, "Initial Puzzle", initial_puzzle_placeholder)
 
-        # Display solved puzzle if available
+    # Controls
+    st.subheader("Controls")
+    difficulty = st.selectbox("Select Difficulty:", ["Easy", "Medium", "Hard"], 
+                             index=["Easy", "Medium", "Hard"].index(st.session_state.difficulty))
+    clue_map = {"Easy": 40, "Medium": 30, "Hard": 25}
+    
+    if difficulty != st.session_state.difficulty:
+        st.session_state.difficulty = difficulty
+        st.session_state.board = SudokuCSP.generate_random_sudoku(clues=clue_map[difficulty])
+        st.session_state.original_board = copy.deepcopy(st.session_state.board)
+        st.session_state.solved_board = None
+        st.session_state.performance = None
+        st.session_state.metrics = compute_metrics(st.session_state.board)
+        st.rerun()
+
+    method = st.selectbox("Select Solving Method:", 
+                         ["Basic Backtracking", "Forward Checking", "Arc Consistency", "Heuristics (MRV + Degree + LCV)"])
+    
+    method_map = {
+        "Basic Backtracking": "basic",
+        "Forward Checking": "fc",
+        "Arc Consistency": "ac3",
+        "Heuristics (MRV + Degree + LCV)": "heuristics"
+    }
+    selected_method = method_map[method]
+
+    # Solve button
+    if st.button("Solve"):
+        sudoku = SudokuCSP(copy.deepcopy(st.session_state.board))
+        times = []
+        
+        if selected_method == "basic":
+            solver = sudoku.backtracking_search
+        elif selected_method == "fc":
+            solver = sudoku.backtracking_fc
+        elif selected_method == "ac3":
+            solver = sudoku.backtracking_ac3
+        else:
+            solver = lambda: sudoku.backtracking_with_heuristics("mrv+degree", "lcv")
+
+        for _ in range(10):
+            temp_sudoku = SudokuCSP(copy.deepcopy(st.session_state.board))
+            start_time = time.time()
+            if not solver():
+                st.error(f"No solution exists for {method}!")
+                st.session_state.solved_board = None
+                performance_placeholder.write("Solve failed.")
+                return
+            end_time = time.time()
+            times.append(end_time - start_time)
+            if _ == 0:
+                st.session_state.solved_board = temp_sudoku.board
+
+        avg_time = sum(times) / len(times)
+        st.session_state.performance = f"Selected Method Performance ({method}): {avg_time:.4f} seconds (avg over 10 runs)"
+        
+        # Force display of solved puzzle
         if st.session_state.solved_board is not None:
-            display_grid(st.session_state.solved_board, "Solved Puzzle")
-            if st.session_state.performance:
-                st.write(st.session_state.performance)
+            display_grid(st.session_state.solved_board, "Solved Puzzle", solved_puzzle_placeholder)
+            performance_placeholder.write(st.session_state.performance)
+        else:
+            performance_placeholder.write("Failed to generate solved puzzle.")
 
-    with col2:
-        # Difficulty selection
-        difficulty = st.selectbox("Select Difficulty:", ["Easy", "Medium", "Hard"], 
-                                 index=["Easy", "Medium", "Hard"].index(st.session_state.difficulty))
-        clue_map = {"Easy": 40, "Medium": 30, "Hard": 25}
-        
-        if difficulty != st.session_state.difficulty:
-            st.session_state.difficulty = difficulty
-            st.session_state.board = SudokuCSP.generate_random_sudoku(clues=clue_map[difficulty])
-            st.session_state.original_board = copy.deepcopy(st.session_state.board)
-            st.session_state.solved_board = None
-            st.session_state.performance = None
-            st.session_state.metrics = compute_metrics(st.session_state.board)
-            st.rerun()
+    # Display solved puzzle and performance if already solved
+    if st.session_state.solved_board is not None:
+        display_grid(st.session_state.solved_board, "Solved Puzzle", solved_puzzle_placeholder)
+        if st.session_state.performance:
+            performance_placeholder.write(st.session_state.performance)
 
-        # Method selection
-        method = st.selectbox("Select Solving Method:", 
-                             ["Basic Backtracking", "Forward Checking", "Arc Consistency", "Heuristics (MRV + Degree + LCV)"])
-        
-        # Map method to internal name
-        method_map = {
-            "Basic Backtracking": "basic",
-            "Forward Checking": "fc",
-            "Arc Consistency": "ac3",
-            "Heuristics (MRV + Degree + LCV)": "heuristics"
-        }
-        selected_method = method_map[method]
+    # New puzzle button
+    if st.button("New Puzzle"):
+        st.session_state.board = SudokuCSP.generate_random_sudoku(clues=clue_map[st.session_state.difficulty])
+        st.session_state.original_board = copy.deepcopy(st.session_state.board)
+        st.session_state.solved_board = None
+        st.session_state.performance = None
+        st.session_state.metrics = compute_metrics(st.session_state.board)
+        solved_puzzle_placeholder.empty()
+        performance_placeholder.empty()
+        st.rerun()
 
-        # Solve button
-        if st.button("Solve"):
-            sudoku = SudokuCSP(copy.deepcopy(st.session_state.board))
-            times = []
-            
-            if selected_method == "basic":
-                solver = sudoku.backtracking_search
-            elif selected_method == "fc":
-                solver = sudoku.backtracking_fc
-            elif selected_method == "ac3":
-                solver = sudoku.backtracking_ac3
-            else:  # heuristics
-                solver = lambda: sudoku.backtracking_with_heuristics("mrv+degree", "lcv")
-
-            for _ in range(10):
-                temp_sudoku = SudokuCSP(copy.deepcopy(st.session_state.board))
-                start_time = time.time()
-                if not solver():
-                    st.error(f"No solution exists for {method}!")
-                    st.session_state.solved_board = None
-                    return
-                end_time = time.time()
-                times.append(end_time - start_time)
-                if _ == 0:
-                    st.session_state.solved_board = temp_sudoku.board
-
-            avg_time = sum(times) / len(times)
-            st.session_state.performance = f"Selected Method Performance ({method}): {avg_time:.4f} seconds (avg over 10 runs)"
-
-        # New puzzle button
-        if st.button("New Puzzle"):
-            st.session_state.board = SudokuCSP.generate_random_sudoku(clues=clue_map[st.session_state.difficulty])
-            st.session_state.original_board = copy.deepcopy(st.session_state.board)
-            st.session_state.solved_board = None
-            st.session_state.performance = None
-            st.session_state.metrics = compute_metrics(st.session_state.board)
-            st.rerun()
-
-    # Comparison table for all methods
+    # Comparison table
     st.subheader("Comparison of Solving Methods")
     if st.session_state.metrics:
         metrics_data = []
